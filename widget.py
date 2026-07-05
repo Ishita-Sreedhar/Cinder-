@@ -83,7 +83,7 @@ class BuddyCat:
         self.graphic.addEllipse(62,38,12,8,self.pen,pink_brush)
 
         #nose
-        self.graphic.addEllipse(52,36,10,6, self.pen, self.black_brush)
+        self.graphic.addEllipse(51,36,10,6, self.pen, self.black_brush)
 
         #eyes
         self.graphic.addEllipse(41,22,13,16, self.pen, self.black_brush)
@@ -119,6 +119,14 @@ class BuddyCat:
         whisker.lineTo(78,46)
         self.graphic.addPath(whisker, whisker_pen)
 
+        #paws
+        paw_pen=QPen(Qt.GlobalColor.black, 1.5, Qt.PenStyle.SolidLine)
+        paws= QPainterPath()
+        paws.moveTo(37,120)
+        paws.cubicTo(37,146,52,146,52,120)
+        paws.moveTo(63,120)
+        paws.cubicTo(63,145,78,145,78,120)
+        self.graphic.addPath(paws,paw_pen)
         #collar 
         collar_path = QPainterPath()
         collar_path.addRoundedRect(QRectF(31, 57, 48, 6), 5, 5)
