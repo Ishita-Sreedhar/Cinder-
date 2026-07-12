@@ -1,7 +1,8 @@
 import sys
-from PyQt6.QtCore import Qt, QPoint, QPointF, QRectF
+from PyQt6.QtCore import Qt, QPoint, QPointF, QRectF, QTimer, QObject
 from PyQt6.QtWidgets import QApplication, QGraphicsView, QWidget, QMenu, QGraphicsScene, QVBoxLayout
 from PyQt6.QtGui import QMouseEvent, QContextMenuEvent, QPainterPath, QBrush, QPen, QPolygonF, QColor
+from math import sin, cos
 
 class DesktopBuddy(QWidget):
     #creates a widget for the desktop buddy
@@ -34,15 +35,18 @@ class DesktopBuddy(QWidget):
         menu.addAction("Exit", QApplication.instance().quit)
         menu.exec(event.globalPos())
 
-class BuddyCat:
+class BuddyCat(QObject):
     def __init__(self):
         #creates transparent QGraphicScene displayed by QGraphicViews
+        super().__init__()
         self.graphic = QGraphicsScene()
         self.graphic.setBackgroundBrush(QBrush(Qt.GlobalColor.transparent))
         self.graphic.setSceneRect(0,0,120,150)
         self.view = QGraphicsView(self.graphic)
         self.view.setStyleSheet("background: transparent; border: none;")
         self.view.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)  #done so that this doesnt overshadow our mousepress events in other class
+        
+
 
         #setting the style of our pen and brush
         self.pen = QPen(Qt.GlobalColor.white, 3, Qt.PenStyle.SolidLine)
@@ -57,13 +61,14 @@ class BuddyCat:
         self.graphic.addEllipse(30, 15, 50, 50, self.pen, self.white_brush)
         
         #tail
-        self.path = QPainterPath()
-        self.path.moveTo(65, 138)                                   
-        self.path.cubicTo(95, 135, 109, 120, 118, 85)                   
-        self.path.cubicTo(115, 77, 110, 77, 107, 85)                 
-        self.path.cubicTo(103, 88, 110, 118, 78, 118)               
-        self.path.closeSubpath()
-        self.graphic.addPath(self.path, self.pen, self.white_brush)
+        self.tail_item = self.graphic.addPath(QPainterPath(), self.pen)
+        self.tail_item.setBrush(self.white_brush)
+        self.draw_tail()
+        self.sway_angle = 0
+        self.timer1 = QTimer(self)
+        self.timer1.timeout.connect(self.animate_tail)
+        self.timer1.start(50)
+        
 
         #ears
         left_ear = QPolygonF([QPointF(38,20), QPointF(48,20), QPointF(41,5)])
@@ -86,10 +91,16 @@ class BuddyCat:
         self.graphic.addEllipse(51,36,10,6, self.pen, self.black_brush)
 
         #eyes
-        self.graphic.addEllipse(41,22,13,16, self.pen, self.black_brush)
-        self.graphic.addEllipse(47,28,2,4, self.pen, self.white_brush)
-        self.graphic.addEllipse(57,22,13,16, self.pen, self.black_brush)
-        self.graphic.addEllipse(63,28,2,4, self.pen, self.white_brush)
+        self.left_eye = self.graphic.addEllipse(41,22,13,16, self.pen, self.black_brush)
+        self.left_eye_inner = self.graphic.addEllipse(47,28,2,4, self.pen, self.white_brush)
+        self.right_eye = self.graphic.addEllipse(57,22,13,16, self.pen, self.black_brush)
+        self.right_eye_inner = self.graphic.addEllipse(63,28,2,4, self.pen, self.white_brush)
+        self.blinkheight = 16
+        self.closing = True
+        self.timer2 = QTimer(self)
+        self.timer2.timeout.connect(self.animate_blink)
+        self.timer2.start(4000)
+        
 
         #mouth
         mouth_pen = QPen(QColor(0, 0, 0, 200))
@@ -127,6 +138,7 @@ class BuddyCat:
         paws.moveTo(63,120)
         paws.cubicTo(63,145,78,145,78,120)
         self.graphic.addPath(paws,paw_pen)
+
         #collar 
         collar_path = QPainterPath()
         collar_path.addRoundedRect(QRectF(31, 57, 48, 6), 5, 5)
@@ -134,7 +146,29 @@ class BuddyCat:
 
         #bell
         self.graphic.addEllipse(48,59,12,12,QPen(Qt.PenStyle.NoPen),QBrush(QColor(245, 215, 90)))
+
+    def draw_tail(self, x_offset = 0):
+        self.path = QPainterPath()
+        self.path.moveTo(65 , 138 )                                   
+        self.path.cubicTo(95 + x_offset, 135, 109 + x_offset, 120, 118 + x_offset, 85)                   
+        self.path.cubicTo(115 + x_offset, 77, 110 + x_offset, 77, 107 + x_offset, 85)                 
+        self.path.cubicTo(103 + x_offset, 88, 110 + x_offset, 118, 78 + x_offset, 118)               
+        self.path.closeSubpath()
+        self.tail_item.setPath(self.path)
+
+    def animate_tail(self):
+        self.sway_angle += 0.1
+        x_offset = sin(self.sway_angle) * 4
+        self.draw_tail(x_offset)
+
+    def animate_blink(self):
+        self.left_eye.setRect(41,22,13,0)   # close
+        self.right_eye.setRect(57,22,13,0)  # close
+        QTimer.singleShot(200, self.reopen_eyes)
         
+    def reopen_eyes(self):
+        self.left_eye.setRect(41,22,13,16)
+        self.right_eye.setRect(57,22,13,16)
 #creating a window for the widget
 app = QApplication(sys.argv)
 window = DesktopBuddy()
