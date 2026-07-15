@@ -1,10 +1,11 @@
 import sys
 from PyQt6.QtCore import Qt, QPoint, QPointF, QRectF, QTimer, QObject
-from PyQt6.QtWidgets import QApplication, QGraphicsView, QWidget, QMenu, QGraphicsScene, QVBoxLayout
+from PyQt6.QtWidgets import QApplication, QGraphicsView, QWidget, QMenu, QGraphicsScene, QVBoxLayout, QLabel
 from PyQt6.QtGui import QMouseEvent, QContextMenuEvent, QPainterPath, QBrush, QPen, QPolygonF, QColor, QCursor
-from math import sin, cos, atan2, sqrt
-import time
+from math import sin, sqrt
+import time, datetime
 from pynput import keyboard, mouse
+from datetime import datetime
 
 class DesktopBuddy(QWidget):
     #creates a widget for the desktop buddy
@@ -14,6 +15,7 @@ class DesktopBuddy(QWidget):
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True )
         self.offset = QPoint()
+        self.setFixedSize(600,200)
 
         #creates the cat , layouts it and adds it into the widget
         self.cat = BuddyCat()
@@ -21,6 +23,28 @@ class DesktopBuddy(QWidget):
         self.layout.addWidget(self.cat.view)
         self.setLayout(self.layout)
         self.show()
+
+        #greeting
+        curr_time = datetime.now().hour
+        if(curr_time >=0 and curr_time<4): text = "Buddy it's midnight. SLEEP!!!!"
+        elif ( curr_time >= 4 and curr_time <= 8): text = "Wakey Wakey!"
+        elif (curr_time > 8 and curr_time <= 12): text = "Good Morning!"
+        elif (curr_time >12 and curr_time <= 15): text = "Afternoon already?"
+        elif (curr_time > 15 and curr_time <=19 ): text = "Tea timeee"
+        elif ( curr_time > 19 and curr_time < 22): text = "Chill mode? or hustle mode?"
+        elif (curr_time > 22 and curr_time <=23 ): text = "Giving night owl vibes.."
+        
+        message = QLabel(text)
+        message.setStyleSheet(""" background-color: rgb(243, 243, 219); 
+                              padding: 6px 10px;
+                              border-radius: 10px;
+                              color: black;
+                              font-size: 12px""")
+        message.setParent(self)
+        message.adjustSize()
+        message.move(300,3)
+        message.show()
+        QTimer.singleShot(6000, message.hide)
 
     #lets us select the widget
     def mousePressEvent(self, event: QMouseEvent):
