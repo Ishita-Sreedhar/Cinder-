@@ -1,8 +1,8 @@
 import sys
 from PyQt6.QtCore import Qt, QPoint, QPointF, QRectF, QTimer, QObject
 from PyQt6.QtWidgets import QApplication, QGraphicsView, QWidget, QMenu, QGraphicsScene, QVBoxLayout
-from PyQt6.QtGui import QMouseEvent, QContextMenuEvent, QPainterPath, QBrush, QPen, QPolygonF, QColor
-from math import sin, cos
+from PyQt6.QtGui import QMouseEvent, QContextMenuEvent, QPainterPath, QBrush, QPen, QPolygonF, QColor, QCursor
+from math import sin, cos, atan2, sqrt
 
 class DesktopBuddy(QWidget):
     #creates a widget for the desktop buddy
@@ -46,8 +46,6 @@ class BuddyCat(QObject):
         self.view.setStyleSheet("background: transparent; border: none;")
         self.view.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)  #done so that this doesnt overshadow our mousepress events in other class
         
-
-
         #setting the style of our pen and brush
         self.pen = QPen(Qt.GlobalColor.white, 3, Qt.PenStyle.SolidLine)
         self.white_brush = QBrush(Qt.GlobalColor.white, Qt.BrushStyle.SolidPattern)
@@ -67,6 +65,7 @@ class BuddyCat(QObject):
         self.sway_angle = 0
         self.timer1 = QTimer(self)
         self.timer1.timeout.connect(self.animate_tail)
+        self.timer1.timeout.connect(self.track_cursor)
         self.timer1.start(50)
         
 
@@ -169,6 +168,25 @@ class BuddyCat(QObject):
     def reopen_eyes(self):
         self.left_eye.setRect(41,22,13,16)
         self.right_eye.setRect(57,22,13,16)
+
+    def track_cursor(self):
+        mouse_screen = QCursor.pos()
+        mouse_scene = self.view.mapToScene(self.view.mapFromGlobal(mouse_screen))
+        mouse_x = mouse_scene.x()
+        mouse_y = mouse_scene.y()
+        max_offset = 3
+        dx_left = mouse_x - 47 
+        dx_right = mouse_x - 63
+        dy_left = mouse_y - 28
+        dy_right = mouse_y - 28
+        distance_left = sqrt((dx_left*dx_left) + (dy_left*dy_left))
+        distance_right = sqrt((dx_right*dx_right) + (dy_right*dy_right))
+        new_x_left = 47 + dx_left * (max_offset / distance_left)
+        new_y_left = 28 + dy_left * (max_offset / distance_left)
+        new_x_right = 63 + dx_right * (max_offset / distance_right)
+        new_y_right = 28 + dy_right * (max_offset / distance_right)
+        self.left_eye_inner.setPos( dx_left * (max_offset / distance_left), dy_left * (max_offset / distance_left))
+        self.right_eye_inner.setPos( dx_right * (max_offset / distance_right), dy_right * (max_offset / distance_right) )
 #creating a window for the widget
 app = QApplication(sys.argv)
 window = DesktopBuddy()
