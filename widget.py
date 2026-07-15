@@ -3,6 +3,8 @@ from PyQt6.QtCore import Qt, QPoint, QPointF, QRectF, QTimer, QObject
 from PyQt6.QtWidgets import QApplication, QGraphicsView, QWidget, QMenu, QGraphicsScene, QVBoxLayout
 from PyQt6.QtGui import QMouseEvent, QContextMenuEvent, QPainterPath, QBrush, QPen, QPolygonF, QColor, QCursor
 from math import sin, cos, atan2, sqrt
+import time
+from pynput import keyboard, mouse
 
 class DesktopBuddy(QWidget):
     #creates a widget for the desktop buddy
@@ -35,6 +37,7 @@ class DesktopBuddy(QWidget):
         menu.addAction("Exit", QApplication.instance().quit)
         menu.exec(event.globalPos())
 
+
 class BuddyCat(QObject):
     def __init__(self):
         #creates transparent QGraphicScene displayed by QGraphicViews
@@ -66,6 +69,7 @@ class BuddyCat(QObject):
         self.timer1 = QTimer(self)
         self.timer1.timeout.connect(self.animate_tail)
         self.timer1.timeout.connect(self.track_cursor)
+        self.timer1.timeout.connect(self.update_state)
         self.timer1.start(50)
         
 
@@ -94,6 +98,20 @@ class BuddyCat(QObject):
         self.left_eye_inner = self.graphic.addEllipse(47,28,2,4, self.pen, self.white_brush)
         self.right_eye = self.graphic.addEllipse(57,22,13,16, self.pen, self.black_brush)
         self.right_eye_inner = self.graphic.addEllipse(63,28,2,4, self.pen, self.white_brush)
+
+        closed_left_eye_path = QPainterPath()
+        closed_eye_pen = QPen(Qt.GlobalColor.black, 1)
+        closed_left_eye_path.moveTo(41,30)
+        closed_left_eye_path.cubicTo(41,36, 49,36, 49,30)
+        self.closed_left_eye = self.graphic.addPath(closed_left_eye_path, closed_eye_pen)
+        self.closed_left_eye.setVisible(False)
+        closed_right_eye_path = QPainterPath()
+        closed_right_eye_path.moveTo(60,30)
+        closed_right_eye_path.cubicTo(60,36, 68,36, 68,30)
+        self.closed_right_eye = self.graphic.addPath(closed_right_eye_path, closed_eye_pen)
+        self.closed_right_eye.setVisible(False)
+        
+
         self.blinkheight = 16
         self.closing = True
         self.timer2 = QTimer(self)
@@ -110,7 +128,9 @@ class BuddyCat(QObject):
         
         muzzle_path.moveTo(56,48)
         muzzle_path.lineTo(56,38)
-        self.graphic.addPath(muzzle_path, mouth_pen)
+        self.muzzle = self.graphic.addPath(muzzle_path, mouth_pen)
+        self.sleep_muzzle = self.graphic.addEllipse(52.5,44, 8, 8, mouth_pen, self.black_brush)
+        self.sleep_muzzle.setVisible(False)
 
         #whiskers
         whisker_pen = QPen(QColor(0, 0, 0, 128))
@@ -146,6 +166,14 @@ class BuddyCat(QObject):
         #bell
         self.graphic.addEllipse(48,59,12,12,QPen(Qt.PenStyle.NoPen),QBrush(QColor(245, 215, 90)))
 
+        #sleep tracking
+        self.sleeping = False 
+        self.last_activity = time.time()
+        self.keyboard_activity = keyboard.Listener(on_press = self.key_press)
+        self.keyboard_activity.start()
+        self.mouse_listener = mouse.Listener(on_scroll=self.on_scroll)
+        self.mouse_listener.start()
+
     def draw_tail(self, x_offset = 0):
         self.path = QPainterPath()
         self.path.moveTo(65 , 138 )                                   
@@ -157,21 +185,31 @@ class BuddyCat(QObject):
 
     def animate_tail(self):
         self.sway_angle += 0.1
+        if (self.sleeping): 
+            pulse = sin(self.sway_angle) * 2 + 4
+            self.sleep_muzzle.setRect(55.75 - (pulse/2), 47 - (pulse/2), pulse, pulse)
+            return 
         x_offset = sin(self.sway_angle) * 4
         self.draw_tail(x_offset)
 
     def animate_blink(self):
+        if (self.sleeping): return
         self.left_eye.setRect(41,22,13,0)   # close
         self.right_eye.setRect(57,22,13,0)  # close
         QTimer.singleShot(200, self.reopen_eyes)
-        
+
     def reopen_eyes(self):
+        if(self.sleeping): return
         self.left_eye.setRect(41,22,13,16)
         self.right_eye.setRect(57,22,13,16)
 
     def track_cursor(self):
-        mouse_screen = QCursor.pos()
-        mouse_scene = self.view.mapToScene(self.view.mapFromGlobal(mouse_screen))
+        current_pos = QCursor.pos()
+        if(current_pos == getattr(self, 'last_mouse_pos', None)):
+            return
+        self.last_mouse_pos = current_pos
+        self.last_activity = time.time()
+        mouse_scene = self.view.mapToScene(self.view.mapFromGlobal(current_pos))
         mouse_x = mouse_scene.x()
         mouse_y = mouse_scene.y()
         max_offset = 3
@@ -181,12 +219,39 @@ class BuddyCat(QObject):
         dy_right = mouse_y - 28
         distance_left = sqrt((dx_left*dx_left) + (dy_left*dy_left))
         distance_right = sqrt((dx_right*dx_right) + (dy_right*dy_right))
-        new_x_left = 47 + dx_left * (max_offset / distance_left)
-        new_y_left = 28 + dy_left * (max_offset / distance_left)
-        new_x_right = 63 + dx_right * (max_offset / distance_right)
-        new_y_right = 28 + dy_right * (max_offset / distance_right)
         self.left_eye_inner.setPos( dx_left * (max_offset / distance_left), dy_left * (max_offset / distance_left))
-        self.right_eye_inner.setPos( dx_right * (max_offset / distance_right), dy_right * (max_offset / distance_right) )
+        self.right_eye_inner.setPos( dx_right * (max_offset / distance_right), dy_right * (max_offset / distance_right))
+
+    def key_press(self, key):
+        self.last_activity = time.time()
+
+    def on_scroll(self, x, y, dx, dy):
+        print("s")
+        self.last_activity = time.time()
+
+    def update_state(self):
+        if (time.time() - self.last_activity > 600) and (self.sleeping == False) :
+            self.sleeping = True
+            self.closed_left_eye.setVisible(True)
+            self.closed_right_eye.setVisible(True) 
+            self.sleep_muzzle.setVisible(True)
+            self.left_eye.setVisible(False)
+            self.right_eye.setVisible(False)
+            self.muzzle.setVisible(False)
+            self.left_eye.setRect(41,22,13,0)
+            self.right_eye.setRect(57,22,13,0)
+
+        elif (time.time() - self.last_activity <= 600) and (self.sleeping == True):
+            self.sleeping = False
+            self.closed_left_eye.setVisible(False)
+            self.closed_right_eye.setVisible(False) 
+            self.sleep_muzzle.setVisible(False)
+            self.left_eye.setVisible(True)
+            self.right_eye.setVisible(True)
+            self.muzzle.setVisible(True)
+            self.left_eye.setRect(41,22,13,16)
+            self.right_eye.setRect(57,22,13,16)
+     
 #creating a window for the widget
 app = QApplication(sys.argv)
 window = DesktopBuddy()
