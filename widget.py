@@ -1,7 +1,7 @@
 import sys
 from PyQt6.QtCore import Qt, QPoint, QPointF, QRectF, QTimer, QObject
-from PyQt6.QtWidgets import QApplication, QGraphicsView, QWidget, QMenu, QGraphicsScene, QVBoxLayout, QLabel
-from PyQt6.QtGui import QMouseEvent, QContextMenuEvent, QPainterPath, QBrush, QPen, QPolygonF, QColor, QCursor
+from PyQt6.QtWidgets import QApplication, QGraphicsView, QWidget, QMenu, QGraphicsScene, QVBoxLayout, QLabel, QGraphicsTextItem
+from PyQt6.QtGui import QMouseEvent, QContextMenuEvent, QPainterPath, QBrush, QPen, QPolygonF, QColor, QCursor, QPainter, QPixmap, QFont
 from math import sin, sqrt
 import time, datetime
 from pynput import keyboard, mouse
@@ -26,15 +26,15 @@ class DesktopBuddy(QWidget):
 
         #greeting
         curr_time = datetime.now().hour
-        if(curr_time >=0 and curr_time<4): text = "Buddy it's midnight. SLEEP!!!!"
-        elif ( curr_time >= 4 and curr_time <= 8): text = "Wakey Wakey!"
-        elif (curr_time > 8 and curr_time <= 12): text = "Good Morning!"
-        elif (curr_time >12 and curr_time <= 15): text = "Afternoon already?"
-        elif (curr_time > 15 and curr_time <=19 ): text = "Tea timeee"
-        elif ( curr_time > 19 and curr_time < 22): text = "Chill mode? or hustle mode?"
-        elif (curr_time > 22 and curr_time <=23 ): text = "Giving night owl vibes.."
+        if(curr_time >=0 and curr_time<4): self.text = "Buddy it's midnight. SLEEP!!!!"
+        elif ( curr_time >= 4 and curr_time <= 8): self.text = "Wakey Wakey!"
+        elif (curr_time > 8 and curr_time <= 12): self.text = "Good Morning!"
+        elif (curr_time >12 and curr_time <= 15): self.text = "Afternoon already?"
+        elif (curr_time > 15 and curr_time <=19 ): self.text = "Tea timeee"
+        elif ( curr_time > 19 and curr_time <= 22): self.text = "Chill mode? or hustle mode?"
+        elif (curr_time > 22 and curr_time <=23 ): self.text = "Giving night owl vibes.."
         
-        message = QLabel(text)
+        message = QLabel(self.text)
         message.setStyleSheet(""" background-color: rgb(243, 243, 219); 
                               padding: 6px 10px;
                               border-radius: 10px;
@@ -70,6 +70,8 @@ class BuddyCat(QObject):
         self.graphic.setBackgroundBrush(QBrush(Qt.GlobalColor.transparent))
         self.graphic.setSceneRect(0,0,120,150)
         self.view = QGraphicsView(self.graphic)
+        self.view.setRenderHint(QPainter.RenderHint.Antialiasing)
+        self.view.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
         self.view.setStyleSheet("background: transparent; border: none;")
         self.view.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)  #done so that this doesnt overshadow our mousepress events in other class
         
@@ -250,7 +252,6 @@ class BuddyCat(QObject):
         self.last_activity = time.time()
 
     def on_scroll(self, x, y, dx, dy):
-        print("s")
         self.last_activity = time.time()
 
     def update_state(self):
@@ -275,8 +276,48 @@ class BuddyCat(QObject):
             self.muzzle.setVisible(True)
             self.left_eye.setRect(41,22,13,16)
             self.right_eye.setRect(57,22,13,16)
-     
+
+class TimerWidget(QObject):
+    def __init__(self):
+        super().__init__()
+        self.graphic = QGraphicsScene()
+        self.graphic.setBackgroundBrush(QBrush(Qt.GlobalColor.transparent))
+        self.graphic.setSceneRect(0, 0, 350, 200)
+        self.view = QGraphicsView(self.graphic)
+        self.view.setRenderHint(QPainter.RenderHint.Antialiasing)
+        self.view.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        self.view.setStyleSheet("background: transparent; border: none;")
+
+        pixmap = QPixmap("cind.jpg")
+        pixmap = pixmap.scaled(350, 200, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+        self.backgorund = self.graphic.addPixmap(pixmap)
+
+        self.time_text = QGraphicsTextItem("1 : 30 : 30")
+        self.time_text.setPos(80,10)
+        self.time_text.setFont(QFont("Cooper Black", 30))
+        self.time_text.setDefaultTextColor(QColor(176, 136, 123))
+        self.graphic.addItem(self.time_text)
+        self.seconds_left = 90
+        self.timer = QTimer()
+        self.timer.timeout.connect(self.tick)
+        self.timer.start(1000)
+
+    def tick(self):
+        self.seconds_left -= 1
+        self.seconds = self.seconds_left
+        self.hours = self.seconds//3600
+        self.seconds = self.seconds % 3600
+        self.minutes = self.seconds//60
+        self.seconds = self.seconds%60
+        self.time_text.setPlainText(f"{self.hours:02d} : {self.minutes:02d} : {self.seconds:02d}")
+
 #creating a window for the widget
-app = QApplication(sys.argv)
-window = DesktopBuddy()
-app.exec()
+#app = QApplication(sys.argv)
+#window = DesktopBuddy()
+#app.exec()
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    timer_widget = TimerWidget()
+    timer_widget.view.setWindowFlags(Qt.WindowType.FramelessWindowHint)
+    timer_widget.view.show()
+    app.exec()
