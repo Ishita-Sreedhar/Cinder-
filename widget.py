@@ -1,6 +1,6 @@
 import sys
 from PyQt6.QtCore import Qt, QPoint, QPointF, QRectF, QTimer, QObject
-from PyQt6.QtWidgets import QApplication, QGraphicsView, QWidget, QMenu, QGraphicsScene, QVBoxLayout, QLabel, QGraphicsTextItem, QGraphicsItemGroup,QGraphicsPolygonItem, QGraphicsRectItem
+from PyQt6.QtWidgets import QApplication, QGraphicsView, QWidget, QMenu, QGraphicsScene, QVBoxLayout, QLabel, QGraphicsTextItem, QGraphicsItemGroup,QGraphicsPolygonItem, QGraphicsRectItem, QLineEdit, QGraphicsPathItem, QGraphicsProxyWidget
 from PyQt6.QtGui import QMouseEvent, QContextMenuEvent, QPainterPath, QBrush, QPen, QPolygonF, QColor, QCursor, QPainter, QPixmap, QFont
 from math import sin, sqrt
 import time, datetime
@@ -55,10 +55,17 @@ class DesktopBuddy(QWidget):
         self.window_Position = event.globalPosition().toPoint() - self.offset
         self.move(self.window_Position)
 
+    def OpenTimerMenu(self):
+        self.menu_option = ChoiceSelection(self)
+        self.menu_option.view.setWindowFlags(Qt.WindowType.FramelessWindowHint)
+        self.menu_option.view.show()
+        self.hide()
+
     #opens context menu on right click
     def contextMenuEvent(self, event: QContextMenuEvent):
         menu = QMenu()
         menu.addAction("Exit", QApplication.instance().quit)
+        menu.addAction("Timer", self.OpenTimerMenu)
         menu.exec(event.globalPos())
 
 
@@ -200,6 +207,7 @@ class BuddyCat(QObject):
         self.mouse_listener = mouse.Listener(on_scroll=self.on_scroll)
         self.mouse_listener.start()
 
+    #tail drawing
     def draw_tail(self, x_offset = 0):
         self.path = QPainterPath()
         self.path.moveTo(65 , 138 )                                   
@@ -209,6 +217,8 @@ class BuddyCat(QObject):
         self.path.closeSubpath()
         self.tail_item.setPath(self.path)
 
+
+    #animating the tail
     def animate_tail(self):
         self.sway_angle += 0.1
         if (self.sleeping): 
@@ -218,17 +228,20 @@ class BuddyCat(QObject):
         x_offset = sin(self.sway_angle) * 4
         self.draw_tail(x_offset)
 
+    #blink
     def animate_blink(self):
         if (self.sleeping): return
         self.left_eye.setRect(41,22,13,0)   # close
         self.right_eye.setRect(57,22,13,0)  # close
         QTimer.singleShot(200, self.reopen_eyes)
 
+    #opening eyes after sleep
     def reopen_eyes(self):
         if(self.sleeping): return
         self.left_eye.setRect(41,22,13,16)
         self.right_eye.setRect(57,22,13,16)
 
+    #cursor tracking
     def track_cursor(self):
         current_pos = QCursor.pos()
         if(current_pos == getattr(self, 'last_mouse_pos', None)):
@@ -248,12 +261,15 @@ class BuddyCat(QObject):
         self.left_eye_inner.setPos( dx_left * (max_offset / distance_left), dy_left * (max_offset / distance_left))
         self.right_eye_inner.setPos( dx_right * (max_offset / distance_right), dy_right * (max_offset / distance_right))
 
+    #key tracking
     def key_press(self, key):
         self.last_activity = time.time()
 
+    #scroll tracking
     def on_scroll(self, x, y, dx, dy):
         self.last_activity = time.time()
 
+    # sleep and wake up trigger
     def update_state(self):
         if (time.time() - self.last_activity > 600) and (self.sleeping == False) :
             self.sleeping = True
@@ -277,27 +293,40 @@ class BuddyCat(QObject):
             self.left_eye.setRect(41,22,13,16)
             self.right_eye.setRect(57,22,13,16)
 
+#timer 
 class TimerWidget(QObject):
-    def __init__(self):
+    #initializing and setting up the timer widget
+    def __init__(self, mode, duration, main_window):
         super().__init__()
+        self.main_window = main_window
         self.graphic = QGraphicsScene()
         self.graphic.setBackgroundBrush(QBrush(Qt.GlobalColor.transparent))
         self.graphic.setSceneRect(0, 0, 350, 200)
-        self.view = QGraphicsView(self.graphic)
+        self.view = DraggableView(self.graphic, self.main_window)
         self.view.setRenderHint(QPainter.RenderHint.Antialiasing)
         self.view.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        self.view.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.mode = mode
+    
         self.view.setStyleSheet("background: transparent; border: none;")
 
+        #setting background image
         pixmap = QPixmap("cind.jpg")
-        pixmap = pixmap.scaled(350, 200, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+        pixmap = pixmap.scaled(350, 200, Qt.AspectRatioMode.IgnoreAspectRatio, Qt.TransformationMode.SmoothTransformation)
         self.backgorund = self.graphic.addPixmap(pixmap)
 
-        self.time_text = QGraphicsTextItem("00 : 00 : 00")
+        # converting seconds into minutes and hours
+        self.seconds_left =duration
+        self.seconds = self.seconds_left
+        self.hours = self.seconds//3600
+        self.seconds = self.seconds % 3600
+        self.minutes = self.seconds//60
+        self.seconds = self.seconds%60
+        self.time_text= QGraphicsTextItem(f"{self.hours:02d} : {self.minutes:02d} : {self.seconds:02d}")
         self.time_text.setPos(20,1)
         self.time_text.setFont(QFont("Cooper Black", 45))
         self.time_text.setDefaultTextColor(QColor(176, 136, 123))
         self.graphic.addItem(self.time_text)
-        self.seconds_left =10
         self.phase = "Work"
         self.phase_text = QGraphicsTextItem("Work Time!")
         self.phase_text.setPos(140,60)
@@ -308,9 +337,11 @@ class TimerWidget(QObject):
         self.timer = QTimer()
         self.timer.timeout.connect(self.tick)
 
+        #timer start button
         self.initial = StartButton(self)
         self.initial.setPos(170,75)
         self.graphic.addItem(self.initial)
+
 
 
     def tick(self):
@@ -321,27 +352,35 @@ class TimerWidget(QObject):
         self.minutes = self.seconds//60
         self.seconds = self.seconds%60
         self.time_text.setPlainText(f"{self.hours:02d} : {self.minutes:02d} : {self.seconds:02d}")
-        if (self.seconds_left == 0 and self.phase == "Work"):
-            QApplication.beep()
-            self.phase_text.setPlainText("Break Time!")
-            self.seconds_left = 3
-            self.phase = "Break"
-        elif ( self.seconds_left ==0 and self.phase == "Break"):
-            self.count  +=1
-            if (self.count == 2): 
-                QApplication.beep()
-                QApplication.beep()
+
+        if(self.mode=="Custom"):
+            if(self.seconds_left==0):
                 self.timer.stop()
-                self.phase = ""
-                QApplication.beep()
+                self.time_text.setPlainText("Time's Up!")
                 self.initial.setVisible(False)
                 self.phase_text.setPlainText("")
-                self.time_text.setPlainText("Time's Up!")
-            else:
+        else:
+            if (self.seconds_left == 0 and self.phase == "Work"):
                 QApplication.beep()
-                self.phase="Work"
-                self.phase_text.setPlainText("Work Time!")
-                self.seconds_left = 15
+                self.phase_text.setPlainText("Break Time!")
+                self.seconds_left = 3
+                self.phase = "Break"
+            elif ( self.seconds_left ==0 and self.phase == "Break"):
+                self.count  +=1
+                if (self.count == 2): 
+                    QApplication.beep()
+                    QApplication.beep()
+                    self.timer.stop()
+                    self.phase = ""
+                    QApplication.beep()
+                    self.initial.setVisible(False)
+                    self.phase_text.setPlainText("")
+                    self.time_text.setPlainText("Time's Up!")
+                else:
+                    QApplication.beep()
+                    self.phase="Work"
+                    self.phase_text.setPlainText("Work Time!")
+                    self.seconds_left = 15
 
     def start_timer(self):
         self.timer.start(1000)
@@ -350,16 +389,64 @@ class TimerWidget(QObject):
         self.timer.stop()
 
 
+class DraggableView(QGraphicsView):
+    def __init__(self, graphic, main_window):
+        super().__init__(graphic)
+        self.main_window = main_window
+        self.offset = QPoint()
+        self.dragging = False
+
+    #lets us select the widget
+    def mousePressEvent(self, event: QMouseEvent):
+        item = self.itemAt(event.position().toPoint())
+        while item is not None:
+            if isinstance(item,(StartButton, PomodoroChoice, CustomChoice,ConfirmationButton)):
+                self.dragging = False
+                super().mousePressEvent(event)
+                return
+
+            if isinstance(item, QGraphicsProxyWidget):
+                self.dragging = False
+                super().mousePressEvent(event)
+                return 
+            
+            item = item.parentItem()
+        self.offset= event.globalPosition().toPoint() - self.mapToGlobal(QPoint(0,0))
+        self.dragging = True
+
+    def mouseReleaseEvent(self, event: QMouseEvent):
+        self.dragging = False
+        super().mouseReleaseEvent(event)
+
+    def contextMenuEvent(self, event: QContextMenuEvent):
+        menu = QMenu()
+        menu.addAction("Exit", self.close_timer)
+        menu.exec(event.globalPos())
+    
+        #lets us move the widget
+    def mouseMoveEvent(self, event: QMouseEvent):
+        if (self.dragging):
+            super().mouseMoveEvent(event)
+            self.window_Position = event.globalPosition().toPoint() - self.offset
+            self.move(self.window_Position)
+        else: return
+
+    def close_timer(self):
+        self.main_window.show()
+        self.hide()
+
 class ChoiceSelection(QObject):
-     def __init__(self):
+     def __init__(self, main_window):
             super().__init__()
+            self.main_window = main_window
             self.graphic = QGraphicsScene()
             self.graphic.setBackgroundBrush(QBrush(Qt.GlobalColor.transparent))
             self.graphic.setSceneRect(0, 0, 350, 200)
-            self.view = QGraphicsView(self.graphic)
+            self.view = DraggableView(self.graphic, self.main_window)
             self.view.setRenderHint(QPainter.RenderHint.Antialiasing)
             self.view.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
             self.view.setStyleSheet("background: transparent; border: none;")
+            self.view.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
     
             pixmap = QPixmap("cind.jpg")
             pixmap = pixmap.scaled(350, 200, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
@@ -378,10 +465,60 @@ class ChoiceSelection(QObject):
             self.graphic.addItem(self.custom)
 
      def launchPomodoro(self):
-            self.timer_widget = TimerWidget()
-            self.timer_widget.view.setWindowFlags(Qt.WindowType.FramelessWindowHint)
+            self.timer_widget = TimerWidget("Pomodoro",1500,self.main_window)
+            self.timer_widget.view.setWindowFlags(Qt.WindowType.WindowStaysOnTopHint|Qt.WindowType.FramelessWindowHint)
+            self.timer_widget.view.move(self.view.pos())
             self.timer_widget.view.show()
             self.view.hide()
+
+     def launchCustom(self):
+                self.custom.setVisible(False)
+                self.pomodoro.setVisible(False)
+
+                self.display_text = QLineEdit()
+                self.display_text.setPlaceholderText("Enter the number of minutes")
+                self.display_text.setStyleSheet("""
+                QLineEdit {
+                background: transparent;
+                border: none;
+                border-bottom: 2px solid #555555;
+                color: #333333;
+                padding: 5px;
+                }
+                """)
+                proxy = self.graphic.addWidget(self.display_text)
+                proxy.setPos(80, 50)
+
+                self.confirm = ConfirmationButton(self)
+                self.confirm.setPos(140, 80)
+                self.graphic.addItem(self.confirm)
+
+class ConfirmationButton(QGraphicsTextItem):
+    def __init__(self, parent_widget):
+        super().__init__("Confirm")
+        self.parent_widget = parent_widget        
+        self.setFont(QFont("Lucida Fax", 10))
+        self.setDefaultTextColor(QColor(176, 136, 123))
+
+    def mousePressEvent(self, event):
+        self.ConfirmDuration()
+
+    def ConfirmDuration(self):
+        try:
+            time = int(self.parent_widget.display_text.text())
+        except ValueError:
+            self.parent_widget.display_text.clear()
+            self.parent_widget.display_text.setPlaceholderText("Enter a number greater than 0!")
+            return
+        if time <= 0:
+            self.parent_widget.display_text.clear()
+            self.parent_widget.display_text.setPlaceholderText("Enter a number greater than 0!")
+            return
+        self.parent_widget.timer_widget = TimerWidget("Custom", time*60, self.parent_widget.main_window)
+        self.parent_widget.timer_widget.view.setWindowFlags( Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.FramelessWindowHint)
+        self.parent_widget.timer_widget.view.move(self.parent_widget.view.pos())
+        self.parent_widget.timer_widget.view.show()
+        self.parent_widget.view.hide()
 
 class PomodoroChoice(QGraphicsTextItem):
     def __init__(self, parent_widget):
@@ -436,12 +573,6 @@ class StartButton(QGraphicsItemGroup):
             self.pause_bar_2.setVisible(False)
             self.start.setVisible(True)
 #creating a window for the widget
-#app = QApplication(sys.argv)
-#window = DesktopBuddy()
-#app.exec()
-if __name__ == "__main__":
-    app = QApplication(sys.argv)
-    timer_widget = ChoiceSelection()
-    timer_widget.view.setWindowFlags(Qt.WindowType.FramelessWindowHint)
-    timer_widget.view.show()
-    app.exec()
+app = QApplication(sys.argv)
+window = DesktopBuddy()
+app.exec()
