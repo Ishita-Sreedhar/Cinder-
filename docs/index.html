@@ -93,11 +93,27 @@ ol{margin:0 0 24px;padding-left:24px;color:var(--soft)}
 ol li{padding:0 0 10px 6px}
 ol li::marker{color:var(--accent);font-family:Fraunces,Georgia,serif;font-weight:600}
 footer{border-top:1px solid var(--line);padding:30px 24px 50px;text-align:center;color:var(--soft);font-size:15px}
+.manual{max-width:920px}
+.qs{counter-reset:q;list-style:none;margin:0 0 34px;padding:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px}
+.qs li{counter-increment:q;position:relative;padding:22px 20px 18px;background:var(--paper);border:1px solid var(--line);border-radius:14px;box-shadow:0 8px 20px var(--shadow);color:var(--soft);font-size:16.5px;line-height:1.5}
+.qs li:before{content:counter(q);position:absolute;top:-14px;left:18px;width:30px;height:30px;border-radius:50%;background:var(--accent);color:var(--paper);font:600 16px/30px Fraunces,Georgia,serif;text-align:center}
+.qs li b{display:block;font-family:Fraunces,Georgia,serif;font-size:19px;color:var(--ink);margin-bottom:4px}
+.guide{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:18px;margin-bottom:34px}
+.guide>div{padding:22px 24px;border-radius:14px;background:var(--sage)}
+.guide>div:nth-child(even){background:var(--lav)}
+.guide h3{font-size:22px;margin-bottom:8px}
+.guide ul{margin:0;padding-left:20px;color:var(--soft);font-size:16.5px}
+.guide li{padding:2px 0}
+.faq details{background:var(--paper);border:1px solid var(--line);border-radius:12px;padding:14px 20px;margin-bottom:10px}
+.faq summary{cursor:pointer;font-family:Fraunces,Georgia,serif;font-weight:600;font-size:18px;color:var(--ink)}
+.faq summary:focus-visible{outline:3px solid var(--accent);outline-offset:4px}
+.faq details p{margin:10px 0 2px;color:var(--soft);font-size:16.5px}
+kbd{font:inherit;font-weight:600;background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:0 7px}
 @media (prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important}}
 </style>
 </head>
 <body>
-<header><div class="wrap"><a class="logo" href="#top">Cinder</a><nav><a href="#toolkit">What she does</a><a href="#install">Install</a><a href="https://github.com/Ishita-Sreedhar/Cinder-">GitHub</a></nav></div></header>
+<header><div class="wrap"><a class="logo" href="#top">Cinder</a><nav><a href="#toolkit">What she does</a><a href="#manual">How to use</a><a href="#install">Install</a><a href="https://github.com/Ishita-Sreedhar/Cinder-">GitHub</a></nav></div></header>
 
 <main id="top">
 <div class="wrap hero">
@@ -160,6 +176,62 @@ footer{border-top:1px solid var(--line);padding:30px 24px 50px;text-align:center
 <div class="row"><svg width="30" height="30" viewBox="0 0 30 30" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="5" width="20" height="20" rx="4"/><path d="M10 15l4 4 7-8"/></svg><div><h3>Water reminders</h3><p>A nudge as often as you like, and she can hop over your other windows to deliver it.</p></div></div>
 </div>
 <p class="habits">She follows your cursor with her eyes. Circle your mouse around her and she purrs. Leave her alone for a while and she curls up to sleep.</p>
+</section>
+
+<section class="wrap" id="manual">
+<h2>How to use Cinder</h2>
+<p class="intro">A short manual, so you can find everything she does.</p>
+<div class="manual">
+
+<ol class="qs">
+<li><b>Start her</b>Open Cinder and she appears on your desktop, always on top of your other windows.</li>
+<li><b>Move her</b>Click and drag her anywhere you like. She stays where you leave her.</li>
+<li><b>Open the menu</b>Right-click her to find the timer, stopwatch, to-do list and the other tools.</li>
+<li><b>Quit</b>Right-click her and choose <b style="display:inline;font-size:inherit">Exit</b> when you’re done for the day.</li>
+</ol>
+
+<div class="guide">
+<div><h3>Timer &amp; Pomodoro</h3><ul>
+<li>Right-click Cinder and open the timer.</li>
+<li>Pick a Pomodoro round or set your own countdown.</li>
+<li>Press start, and a chime tells you when it’s time to rest.</li>
+</ul></div>
+<div><h3>Stopwatch</h3><ul>
+<li>Open it from the right-click menu.</li>
+<li>Start counts up, pause holds your time, and reset takes it back to zero.</li>
+</ul></div>
+<div><h3>To-do list</h3><ul>
+<li>Open it from the menu and type a task to add it.</li>
+<li>Tick a task off and confetti pops, with Cinder celebrating.</li>
+<li>Your list is saved, so it’s still there next time.</li>
+</ul></div>
+<div><h3>Water reminders</h3><ul>
+<li>Open the water settings from the menu.</li>
+<li>Choose how often you’d like a nudge.</li>
+<li>Cinder reminds you, even if other windows are open.</li>
+</ul></div>
+<div><h3>Petting &amp; moods</h3><ul>
+<li>Circle your cursor around her three times to pet her. She smiles and sends up tiny hearts.</li>
+<li>Her eyes follow your cursor while you work.</li>
+<li>If you leave her alone for a while, she curls up and naps. Click her to wake her.</li>
+</ul></div>
+<div><h3>Windows</h3><ul>
+<li>Tool windows open right where Cinder is sitting.</li>
+<li>Close one with the cross, or minimise it to keep it out of the way.</li>
+<li>You can have several open at once.</li>
+</ul></div>
+</div>
+
+<h3 style="margin:0 0 14px">Good to know</h3>
+<div class="faq">
+<details><summary>Where do I find the tools?</summary><p>Right-click Cinder. Every tool opens from that menu.</p></details>
+<details><summary>I lost her! Where did she go?</summary><p>She always stays on top, so check the edges of your screens (and any second monitor), as you may have dragged her far away. If she’s still missing, close and reopen Cinder.</p></details>
+<details><summary>Windows says it doesn’t recognise the app.</summary><p>Choose <b>More info</b>, then <b>Run anyway</b>. Cinder isn’t code-signed yet, which is why the warning appears.</p></details>
+<details><summary>She doesn’t react to my clicks on a Mac.</summary><p>Open <b>System Settings → Privacy &amp; Security → Accessibility</b> and allow Cinder.</p></details>
+<details><summary>Something isn’t working.</summary><p>Please <a href="https://github.com/Ishita-Sreedhar/Cinder-/issues">tell me on GitHub</a> and I’ll take a look.</p></details>
+</div>
+
+</div>
 </section>
 
 <section class="wrap" id="install">
