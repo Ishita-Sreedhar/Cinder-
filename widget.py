@@ -1,5 +1,7 @@
 import sys
+import os
 import json
+import shutil
 import tempfile
 import time
 import random
@@ -22,20 +24,72 @@ from PyQt6.QtGui import (
 from pynput import keyboard, mouse
 
 
+# ------------------------------------------------------ packaging helpers --
+def resource_path(relative_path):
+    """Path to a file that is BUNDLED with the app (like cind.jpg).
+    Works from source and from the packaged exe (PyInstaller unpacks to sys._MEIPASS)."""
+    if hasattr(sys, "_MEIPASS"):
+        base = sys._MEIPASS
+    else:
+        base = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(base, relative_path)
+
+
+def get_data_dir():
+    """Folder for files the app WRITES (to-dos, water settings, window sizes).
+    It can't be next to the exe: a --onefile exe runs from a temp folder that is
+    deleted on exit, which would wipe your data every time."""
+    if sys.platform == "win32":
+        base = Path(os.environ.get("APPDATA") or Path.home())
+    elif sys.platform == "darwin":
+        base = Path.home() / "Library" / "Application Support"
+    else:
+        base = Path(os.environ.get("XDG_CONFIG_HOME") or (Path.home() / ".config"))
+    folder = base / "Cinder"
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        folder = Path.home()
+    return folder
+
+
 # ---------------------------------------------------------------- settings --
-BASE_DIR = Path(__file__).resolve().parent
-BG_PATH = str(BASE_DIR / "cind.jpg")
-TODO_PATH = BASE_DIR / "todos.json"   # your to-do list is saved here
-WATER_PATH = BASE_DIR / "water.json"  # water reminder settings are saved here
-SIZES_PATH = BASE_DIR / "sizes.json"  # remembers how big you made each window
-WATER_BG_OPACITY = 0.2               # background image strength in the water reminder window
-BG_IMAGE_OPACITY = 0.2                # 0 = invisible, 1 = full strength (lower = easier to read text)
+DATA_DIR = get_data_dir()
+BG_PATH = resource_path("cind.jpg")       # bundled with the exe (see --add-data)
+TODO_PATH = DATA_DIR / "todos.json"       # your to-do list is saved here
+WATER_PATH = DATA_DIR / "water.json"      # water reminder settings are saved here
+SIZES_PATH = DATA_DIR / "sizes.json"      # remembers how big you made each window
+
+
+def migrate_old_data():
+    """Running from source used to save next to the script. Copy that data to the
+    new folder once, so your existing to-dos / settings don't disappear."""
+    if getattr(sys, "frozen", False):
+        return
+    old_dir = Path(__file__).resolve().parent
+    for path in (TODO_PATH, WATER_PATH, SIZES_PATH):
+        old = old_dir / path.name
+        if old.exists() and not path.exists():
+            try:
+                shutil.copy2(old, path)
+            except OSError:
+                pass
+
+
+migrate_old_data()
+
+WATER_BG_OPACITY = 0.35              # background image strength in the water reminder window
+BG_IMAGE_OPACITY = 0.35               # 0 = invisible, 1 = full strength (lower = easier to read text)
 WINDOW_RADIUS = 14                    # corner rounding of the timer / stopwatch / to-do windows
 
 WORK_SECONDS = 1500        # 25 min
 BREAK_SECONDS = 300        # 5 min
 POMODORO_ROUNDS = 2        # number of work+break rounds before "Time's Up!"
 SLEEP_AFTER_SECONDS = 600  # idle time before the cat falls asleep
+
+# how far the big digits, label and play/pause button sit below the top of the
+# timer and stopwatch windows (bigger = lower, 0 = the old position)
+CLOCK_Y_OFFSET = 40
 
 # pynput's keyboard listener can hard-crash Python on recent macOS ("Python quit
 # unexpectedly"), so it is off there. The cat still wakes from mouse movement,
@@ -72,6 +126,8 @@ PET_COOLDOWN = 2.0          # seconds before it can be petted again
 
 HEART_LIFETIME = 1.6        # seconds
 HEART_RISE = 20             # px per second
+
+ZZZ_PERIOD = 2.4            # seconds for one "z" to float up and fade while she sleeps
 
 # window resizing (all tool windows scale together with their contents)
 MIN_SCALE = 0.7
@@ -276,7 +332,11 @@ class DesktopBuddy(QWidget):
         self.cat_peeking = False    # the cat was brought back briefly to deliver a reminder
 
         # creates the cat, lays it out and adds it into the widget
+        self.sleep_message_active = False   # the "Zzz" bubble is up
         self.cat = BuddyCat()
+        self.cat.on_sleep = self.show_sleep_message
+        self.cat.on_wake = self.hide_sleep_message
+        self.cat.on_pet = self.show_purr_message
         self.main_layout = QVBoxLayout()
         self.main_layout.addWidget(self.cat.view)
         self.setLayout(self.main_layout)
@@ -324,7 +384,13 @@ class DesktopBuddy(QWidget):
         else:
             self.text = "Giving night owl vibes.."
 
-        self.show_message(self.text)
+        # first a quick hello, then the time-of-day greeting
+        self.show_message("Hi, I'm Cinder!", 3000)
+        QTimer.singleShot(3200, self.show_time_greeting)
+
+    def show_time_greeting(self):
+        if not self.tool_open:
+            self.show_message(self.text)
 
     # lets us select the widget
     def mousePressEvent(self, event: QMouseEvent):
@@ -337,6 +403,7 @@ class DesktopBuddy(QWidget):
 
     # ---- speech bubble ----
     def show_message(self, text, duration=6000):
+        self.sleep_message_active = False
         self.message.setText(text)
         self.message.adjustSize()
         self.message.move(300, 3)
@@ -351,6 +418,24 @@ class DesktopBuddy(QWidget):
             self.cat_peeking = False
             if self.tool_open:
                 self.hide()
+
+    # Cinder fell asleep: a "Zzz" bubble that stays up until she wakes
+    def show_sleep_message(self):
+        if self.tool_open:
+            return
+        self.show_message("Zzz...", 3600000)
+        self.sleep_message_active = True
+
+    def hide_sleep_message(self):
+        if self.sleep_message_active:
+            self.sleep_message_active = False
+            self.message_timer.stop()
+            self.message.hide()
+
+    # being petted: Cinder purrs
+    def show_purr_message(self):
+        if not self.tool_open:
+            self.show_message("Purrrr... \u2665", int(PET_DURATION * 1000))
 
     def keep_cat_on_top(self):
         if self.cat_peeking and self.isVisible():
@@ -383,6 +468,8 @@ class DesktopBuddy(QWidget):
         self.cat_peeking = False
         self.raise_timer.stop()
         self.show()
+        if self.cat.sleeping:            # still asleep when she comes back
+            self.show_sleep_message()
 
     def OpenTimerMenu(self):
         self.menu_option = ChoiceSelection(self)
@@ -504,6 +591,12 @@ class BuddyCat(QObject):
         self.last_activity = time.time()
         self.sway_angle = 0
         self.last_mouse_pos = None
+
+        # the main window sets these so Cinder's speech bubble can react
+        self.on_sleep = None
+        self.on_wake = None
+        self.on_pet = None
+        self.sleep_start = 0.0
 
         # petting state
         self.petting = False
@@ -644,12 +737,24 @@ class BuddyCat(QObject):
         # bell
         self.graphic.addEllipse(48, 59, 12, 12, QPen(Qt.PenStyle.NoPen), QBrush(QColor(245, 215, 90)))
 
+        # little "z z z" that float up from her head while she sleeps
+        self.zzz = []
+        for letter, size in ("z", 9), ("Z", 11), ("z", 13):
+            font = make_font(["Lucida Fax", "Georgia", "serif"], size)
+            font.setBold(True)
+            item = self.graphic.addText(letter, font)
+            item.setDefaultTextColor(QColor(240, 54, 116))
+            item.setZValue(200)
+            item.setVisible(False)
+            self.zzz.append(item)
+
         # animation timers (started once every item exists)
         self.timer1 = QTimer(self)
         self.timer1.timeout.connect(self.animate_tail)
         self.timer1.timeout.connect(self.track_cursor)
         self.timer1.timeout.connect(self.update_state)
         self.timer1.timeout.connect(self.animate_pet)
+        self.timer1.timeout.connect(self.animate_zzz)
         self.timer1.start(50)
 
         self.timer2 = QTimer(self)
@@ -760,8 +865,24 @@ class BuddyCat(QObject):
         elif idle <= SLEEP_AFTER_SECONDS and self.sleeping:
             self.wake_up()
 
+    # floating z z z: each letter drifts up and to the right, fading in and out
+    def animate_zzz(self):
+        if not self.sleeping:
+            for item in self.zzz:
+                if item.isVisible():
+                    item.setVisible(False)
+            return
+        t = (time.time() - self.sleep_start) / ZZZ_PERIOD
+        for i, item in enumerate(self.zzz):
+            phase = (t + i / len(self.zzz)) % 1.0
+            item.setPos(78 + phase * 16, 22 - phase * 24)
+            item.setOpacity(sin(phase * pi))
+            item.setScale(0.8 + 0.5 * phase)
+            item.setVisible(True)
+
     def fall_asleep(self):
         self.sleeping = True
+        self.sleep_start = time.time()
         self.closed_left_eye.setVisible(True)
         self.closed_right_eye.setVisible(True)
         self.sleep_muzzle.setVisible(True)
@@ -770,6 +891,8 @@ class BuddyCat(QObject):
         self.muzzle.setVisible(False)
         self.left_eye.setRect(41, 22, 13, 0)
         self.right_eye.setRect(57, 22, 13, 0)
+        if self.on_sleep:
+            self.on_sleep()
 
     def wake_up(self):
         self.sleeping = False
@@ -781,6 +904,8 @@ class BuddyCat(QObject):
         self.muzzle.setVisible(True)
         self.left_eye.setRect(41, 22, 13, 16)
         self.right_eye.setRect(57, 22, 13, 16)
+        if self.on_wake:
+            self.on_wake()
 
     # ------------------------------------------------------------ petting --
     def reset_circling(self):
@@ -841,6 +966,8 @@ class BuddyCat(QObject):
 
         for _ in range(5):               # little burst of hearts to start
             self.spawn_heart()
+        if self.on_pet:
+            self.on_pet()
 
     def end_pet(self):
         self.petting = False
@@ -929,14 +1056,14 @@ class TimerWidget(QObject):
         self.count = 0
 
         self.time_text = QGraphicsTextItem()
-        self.time_text.setPos(20, 1)
+        self.time_text.setPos(20, 1 + CLOCK_Y_OFFSET)
         self.time_text.setFont(make_font(["Cooper Black", "Georgia", "serif"], 45))
         self.time_text.setDefaultTextColor(TEXT_COLOR)
         self.graphic.addItem(self.time_text)
         self.update_display()
 
         self.phase_text = QGraphicsTextItem("Work Time!")
-        self.phase_text.setPos(140, 60)
+        self.phase_text.setPos(140, 60 + CLOCK_Y_OFFSET)
         self.phase_text.setFont(make_font(["Pluma", "Georgia", "serif"], 10))
         self.phase_text.setDefaultTextColor(TEXT_COLOR)
         self.graphic.addItem(self.phase_text)
@@ -946,7 +1073,7 @@ class TimerWidget(QObject):
 
         # timer start button
         self.initial = StartButton(self)
-        self.initial.setPos(170, 75)
+        self.initial.setPos(170, 75 + CLOCK_Y_OFFSET)
         self.graphic.addItem(self.initial)
 
     # shows seconds_left as HH : MM : SS
@@ -1483,7 +1610,7 @@ class StopwatchWidget(QObject):
         self.start_time = None
 
         self.time_text = QGraphicsTextItem()
-        self.time_text.setPos(20, 1)
+        self.time_text.setPos(20, 1 + CLOCK_Y_OFFSET)
         self.time_text.setFont(make_font(["Cooper Black", "Georgia", "serif"], 45))
         self.time_text.setDefaultTextColor(TEXT_COLOR)
         self.graphic.addItem(self.time_text)
@@ -1491,7 +1618,7 @@ class StopwatchWidget(QObject):
         self.label = QGraphicsTextItem("Stopwatch")
         self.label.setFont(make_font(["Pluma", "Georgia", "serif"], 10))
         self.label.setDefaultTextColor(TEXT_COLOR)
-        self.label.setPos(center_x(self.label), 60)
+        self.label.setPos(center_x(self.label), 60 + CLOCK_Y_OFFSET)
         self.graphic.addItem(self.label)
 
         self.timer = QTimer()
@@ -1507,7 +1634,7 @@ class StopwatchWidget(QObject):
         self.update_display()
 
     # puts the play button and "Reset" side by side, centred in the window and on one line
-    def align_buttons(self, center_y=112, gap=16):
+    def align_buttons(self, center_y=112 + CLOCK_Y_OFFSET, gap=16):
         start_rect = self.initial.boundingRect()
         reset_rect = self.reset_button.boundingRect()
         total = start_rect.width() + gap + reset_rect.width()
