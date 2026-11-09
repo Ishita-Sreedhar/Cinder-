@@ -2,9 +2,9 @@
 
 # 🐾 Cinder 🐾
 
-### a small cat for long work days
+### a cute companion cat for long work days
 
-*A little white cat with a pink collar and a golden bell, who lives on your desktop and keeps you company while you work.*
+
 
 <br>
 
