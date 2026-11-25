@@ -2,11 +2,14 @@ import sys
 import os
 import json
 import shutil
+import subprocess
 import tempfile
 import time
 import random
+import wave
+import array
 from datetime import datetime
-from math import sin, cos, sqrt, ceil, atan2, hypot, pi
+from math import sin, cos, sqrt, ceil, atan2, hypot, exp, pi
 from pathlib import Path
 
 from PyQt6.QtCore import Qt, QPoint, QPointF, QRectF, QTimer, QObject
@@ -203,6 +206,84 @@ def make_font(families, size):
     return font
 
 
+# ------------------------------------------------------------------ sounds --
+# Two soft chimes, synthesized once (no sound files to ship, no codecs, no extra
+# libraries) and saved as .wav in the data folder:
+#   "switch" - work <-> break (two notes)      "done" - timer finished (rising arpeggio)
+# Windows plays them with winsound (built into Python, works on every Windows PC).
+CHIME_RATE = 22050
+CHIME_VERSION = "v1"
+CHIMES = {
+    "switch": [(659.25, 0.30), (880.00, 0.70)],                                    # E5, A5
+    "done": [(523.25, 0.22), (659.25, 0.22), (783.99, 0.22), (1046.50, 0.95)],     # C5 E5 G5 C6
+}
+
+
+def _chime_samples(notes):
+    rate = CHIME_RATE
+    total = sum(d for _, d in notes) + 0.6          # room for the last note to ring out
+    samples = [0.0] * int(total * rate)
+    start = 0.0
+    for freq, length in notes:
+        first = int(start * rate)
+        for i in range(int((length + 0.6) * rate)):
+            if first + i >= len(samples):
+                break
+            t = i / rate
+            attack = min(1.0, t / 0.005)
+            decay = exp(-t * 5.5)
+            tone = (sin(2 * pi * freq * t)
+                    + 0.35 * sin(2 * pi * freq * 2 * t) * exp(-t * 3)
+                    + 0.12 * sin(2 * pi * freq * 3 * t) * exp(-t * 6))
+            samples[first + i] += tone * attack * decay
+        start += length
+    peak = max(abs(x) for x in samples) or 1.0
+    scale = 0.7 * 32767 / peak
+    return array.array("h", (int(x * scale) for x in samples))
+
+
+def get_sound_file(kind):
+    path = DATA_DIR / f"cinder_{kind}_{CHIME_VERSION}.wav"
+    if not path.exists():
+        try:
+            pcm = _chime_samples(CHIMES[kind])
+            if sys.byteorder == "big":
+                pcm.byteswap()
+            with wave.open(str(path), "wb") as wav:
+                wav.setnchannels(1)
+                wav.setsampwidth(2)
+                wav.setframerate(CHIME_RATE)
+                wav.writeframes(pcm.tobytes())
+        except OSError as err:
+            print(f"[DesktopBuddy] Couldn't create the {kind} sound: {err}")
+            return None
+    return str(path)
+
+
+def play_sound(kind):
+    """kind: 'switch' or 'done'. Any failure falls back to the plain system beep."""
+    path = get_sound_file(kind)
+    try:
+        if sys.platform == "win32":
+            import winsound
+            if path:
+                # SND_ASYNC: returns immediately, so the window never freezes
+                winsound.PlaySound(path, winsound.SND_FILENAME | winsound.SND_ASYNC)
+            else:
+                winsound.MessageBeep()
+            return
+        if path:
+            players = [["afplay", path]] if sys.platform == "darwin" else \
+                [["paplay", path], ["aplay", "-q", path]]
+            for command in players:
+                if shutil.which(command[0]):
+                    subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    return
+    except Exception as err:        # a sound problem must never break the timer
+        print(f"[DesktopBuddy] Couldn't play the sound: {err}")
+    QApplication.beep()
+
+
 def add_window_background(scene, width=350, height=200, image=True, crop=False, opacity=None):
     """Rounded cream panel with a brown border, like the menus. The background image
     (if any) is clipped to the rounded corners and faded so the text stays readable.
@@ -256,16 +337,6 @@ def shrink_polygon(points, factor):
         QPointF(cx + (p.x() - cx) * factor, cy + (p.y() - cy) * factor)
         for p in points
     ])
-
-
-def make_sparkle(radius):
-    """A four-point star centred on (0, 0)."""
-    points = []
-    for i in range(8):
-        r = radius if i % 2 == 0 else radius * 0.35
-        angle = i * pi / 4 - pi / 2
-        points.append(QPointF(cos(angle) * r, sin(angle) * r))
-    return QPolygonF(points)
 
 
 def make_heart_path():
@@ -330,6 +401,7 @@ class DesktopBuddy(QWidget):
 
         self.tool_open = False      # a tool window (timer / to-do / ...) is hiding the cat
         self.cat_peeking = False    # the cat was brought back briefly to deliver a reminder
+        self.parked = []            # minimized tool views (keeps them alive while they're pills)
 
         # creates the cat, lays it out and adds it into the widget
         self.sleep_message_active = False   # the "Zzz" bubble is up
@@ -462,7 +534,7 @@ class DesktopBuddy(QWidget):
         tool.view.show()
         self.hide()
 
-    # called when a tool window is closed: the cat comes back
+    # called when a tool window is closed (or minimized): the cat comes back
     def cat_returned(self):
         self.tool_open = False
         self.cat_peeking = False
@@ -470,6 +542,15 @@ class DesktopBuddy(QWidget):
         self.show()
         if self.cat.sleeping:            # still asleep when she comes back
             self.show_sleep_message()
+
+    # a minimized tool was restored from its pill: it hides the cat again
+    def tool_restored(self):
+        self.tool_open = True
+        self.cat_peeking = False
+        self.raise_timer.stop()
+        self.message_timer.stop()
+        self.message.hide()
+        self.hide()
 
     def OpenTimerMenu(self):
         self.menu_option = ChoiceSelection(self)
@@ -1076,6 +1157,24 @@ class TimerWidget(QObject):
         self.initial.setPos(170, 75 + CLOCK_Y_OFFSET)
         self.graphic.addItem(self.initial)
 
+        # what the minimized pill shows (also keeps this object alive while minimized)
+        self.view.mini_text = self.mini_label
+
+    # plays the sound; a minimized window pops back up so you actually notice
+    def notify(self, kind):
+        play_sound(kind)
+        if self.view.minimized:
+            self.view.restore()
+
+    # text for the minimized pill
+    def mini_label(self):
+        if self.phase == "":
+            return "⏰ Time's up!"
+        total = max(0, self.seconds_left)
+        h, m, s = total // 3600, (total % 3600) // 60, total % 60
+        t = f"{h}:{m:02d}:{s:02d}" if h else f"{m:02d}:{s:02d}"
+        return f"⏰ {t}" if self.mode == "Custom" else f"⏰ {self.phase} {t}"
+
     # shows seconds_left as HH : MM : SS
     def update_display(self):
         total = max(0, self.seconds_left)
@@ -1104,21 +1203,19 @@ class TimerWidget(QObject):
             return
 
         if self.phase == "Work":
-            QApplication.beep()
             self.phase = "Break"
             self.phase_text.setPlainText("Break Time!")
             self.begin_phase(BREAK_SECONDS)
+            self.notify("switch")
         else:  # Break just ended
             self.count += 1
             if self.count >= POMODORO_ROUNDS:
-                for _ in range(3):
-                    QApplication.beep()
                 self.finish()
             else:
-                QApplication.beep()
                 self.phase = "Work"
                 self.phase_text.setPlainText("Work Time!")
                 self.begin_phase(WORK_SECONDS)
+                self.notify("switch")
 
     def finish(self):
         self.timer.stop()
@@ -1127,6 +1224,7 @@ class TimerWidget(QObject):
         self.phase_text.setVisible(False)
         self.time_text.setVisible(False)
         self.show_finished()
+        self.notify("done")
 
     # "Time's up!" screen: summary + "continue?" with Yes / No
     def show_finished(self):
@@ -1138,15 +1236,7 @@ class TimerWidget(QObject):
             self.graphic.addItem(item)
             return item
 
-        title = add_text("Time's up!", 24, TEXT_COLOR, 10, ("Cooper Black", "Georgia", "serif"))
-        # a little yellow sparkle either side of the title
-        rect = title.sceneBoundingRect()
-        for x in (rect.left() - 14, rect.right() + 14):
-            sparkle = QGraphicsPolygonItem(make_sparkle(7))
-            sparkle.setBrush(QBrush(QColor(255, 200, 70)))
-            sparkle.setPen(QPen(Qt.PenStyle.NoPen))
-            sparkle.setPos(x, rect.center().y())
-            self.graphic.addItem(sparkle)
+        add_text("Time's up!", 24, TEXT_COLOR, 10, ("Cooper Black", "Georgia", "serif"))
 
         if self.mode == "Custom":
             summary = f"{max(1, self.session_seconds // 60)} min session complete"
@@ -1202,6 +1292,9 @@ class DraggableView(QGraphicsView):
         self.scale_factor = 1.0
         self.offset = QPoint()
         self.dragging = False
+        self.minimized = False          # collapsed into a small pill
+        self.pill = None
+        self.mini_text = None           # each tool sets this: returns the pill's label
         self.set_scale(get_saved_scale(size_key) if size_key else 1.0, save=False)
 
     # resizes the window and everything in it (the aspect ratio stays the same)
@@ -1276,6 +1369,7 @@ class DraggableView(QGraphicsView):
                 sizes.addAction(label, lambda checked=False, v=value: self.apply_preset(v))
             menu.addMenu(sizes)
             menu.addSeparator()
+        menu.addAction("–  Minimize", self.minimize)
         menu.addAction("✖  Exit", self.close_timer)
         menu.exec(event.globalPos())
 
@@ -1291,6 +1385,47 @@ class DraggableView(QGraphicsView):
             self.on_close()
         self.main_window.cat_returned()
         self.hide()
+
+    # ---- minimize: the window collapses into a small pill; the tool keeps running ----
+    def minimize(self):
+        if self.minimized:
+            return
+        self.minimized = True
+        self.pill = MinimizedPill(self)
+        self.pill.move(self.pos())
+        self.pill.show()
+        self.hide()
+        if self not in self.main_window.parked:
+            self.main_window.parked.append(self)
+        # the cat stays hidden while a tool is minimized; a running timer keeps running
+
+    def _drop_pill(self):
+        if self.pill is not None:
+            self.pill.refresh_timer.stop()
+            self.pill.hide()
+            self.pill.deleteLater()
+            self.pill = None
+        self.minimized = False
+        if self in self.main_window.parked:
+            self.main_window.parked.remove(self)
+
+    # click on the pill: the window comes back where the pill is
+    def restore(self):
+        if not self.minimized:
+            return
+        pos = self.pill.pos()
+        self._drop_pill()
+        self.move(pos)
+        self.show()
+        self.keep_on_screen()
+        self.main_window.tool_restored()
+
+    # x on the pill: really close the tool, and the cat comes back
+    def close_from_pill(self):
+        self._drop_pill()
+        if self.on_close:
+            self.on_close()
+        self.main_window.cat_returned()
 
 
 # clickable text that lights up and underlines when you hover over it
@@ -1334,12 +1469,110 @@ class CloseButton(HoverText):
         self.target_view.close_timer()
 
 
+# the little - next to the x: collapses the window into a small pill
+class MinimizeButton(HoverText):
+    UNDERLINE = False
+
+    def __init__(self, view):
+        super().__init__("–")
+        self.target_view = view
+        self.setFont(make_font(["Segoe UI Symbol", "DejaVu Sans", "sans-serif"], 10))
+        self.setDefaultTextColor(TEXT_COLOR)
+        self.setToolTip("Minimize")
+
+    def mousePressEvent(self, event):
+        self.target_view.minimize()
+
+
 def add_close_button(scene, view, width=350):
     button = CloseButton(view)
     button.setPos(width - 10 - button.boundingRect().width(), 2)
     button.setZValue(500)
     scene.addItem(button)
+    mini = MinimizeButton(view)
+    mini.setPos(button.x() - 4 - mini.boundingRect().width(), 2)
+    mini.setZValue(500)
+    scene.addItem(mini)
     return button
+
+
+# what a minimized tool turns into: click to restore, drag to move, x to close
+class MinimizedPill(QWidget):
+    W = 180
+    H = 30
+
+    def __init__(self, view):
+        super().__init__()
+        self.view = view
+        self.setWindowFlags(WIN_FLAGS | Qt.WindowType.WindowDoesNotAcceptFocus)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setFixedSize(self.W, self.H)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setToolTip("Click to restore")
+        self.label = ""
+        self.press_global = None
+        self.offset = QPoint()
+        self.moved = False
+        self.refresh_timer = QTimer(self)
+        self.refresh_timer.timeout.connect(self.refresh)
+        self.refresh_timer.start(500)
+        self.refresh()
+
+    def refresh(self):
+        text = self.view.mini_text() if self.view.mini_text else "Cinder"
+        if text != self.label:
+            self.label = text
+            self.update()
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        rect = QRectF(1.5, 1.5, self.W - 3, self.H - 3)
+        p.setPen(QPen(TEXT_COLOR, 2))
+        p.setBrush(QBrush(QColor(250, 250, 238)))
+        p.drawRoundedRect(rect, rect.height() / 2, rect.height() / 2)
+        p.setFont(make_font(["Lucida Fax", "Georgia", "serif"], 10))
+        p.setPen(TODO_TEXT_COLOR)
+        text_rect = QRectF(14, 0, self.W - 14 - 32, self.H)
+        elided = p.fontMetrics().elidedText(self.label, Qt.TextElideMode.ElideRight,
+                                            int(text_rect.width()))
+        p.drawText(text_rect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, elided)
+        p.setPen(TEXT_COLOR)
+        p.setFont(make_font(["Segoe UI Symbol", "DejaVu Sans", "sans-serif"], 10))
+        p.drawText(QRectF(self.W - 30, 0, 22, self.H), Qt.AlignmentFlag.AlignCenter, "✕")
+
+    def mousePressEvent(self, event):
+        if event.button() != Qt.MouseButton.LeftButton:
+            return
+        self.press_global = event.globalPosition().toPoint()
+        self.offset = self.press_global - self.pos()
+        self.moved = False
+
+    def mouseMoveEvent(self, event):
+        if self.press_global is None:
+            return
+        g = event.globalPosition().toPoint()
+        if (g - self.press_global).manhattanLength() > 4:
+            self.moved = True
+        if self.moved:
+            self.move(g - self.offset)
+
+    def mouseReleaseEvent(self, event):
+        if self.press_global is None:
+            return
+        self.press_global = None
+        if self.moved:
+            return
+        if event.position().x() >= self.W - 30:
+            self.view.close_from_pill()
+        else:
+            self.view.restore()
+
+    def contextMenuEvent(self, event):
+        menu = make_menu()
+        menu.addAction("↗  Restore", self.view.restore)
+        menu.addAction("✖  Close", self.view.close_from_pill)
+        menu.exec(event.globalPos())
 
 
 # the little diagonal lines in the bottom-right corner: drag to resize the window
@@ -1438,6 +1671,8 @@ class ChoiceSelection(QObject):
         self.custom.setPos(center_x(self.custom), 100)
         self.custom.setDefaultTextColor(TEXT_COLOR)
         self.graphic.addItem(self.custom)
+
+        self.view.mini_text = lambda: "⏰ Timer"     # pill label (also keeps this object alive)
 
     def launchPomodoro(self):
         self.timer_widget = TimerWidget("Pomodoro", WORK_SECONDS, self.main_window)
@@ -1633,6 +1868,13 @@ class StopwatchWidget(QObject):
         self.align_buttons()
         self.update_display()
 
+        # what the minimized pill shows (also keeps this object alive while minimized)
+        self.view.mini_text = self.mini_label
+
+    def mini_label(self):
+        total = int(self.current_elapsed())
+        return f"⏱ {total // 3600:02d}:{(total % 3600) // 60:02d}:{total % 60:02d}"
+
     # puts the play button and "Reset" side by side, centred in the window and on one line
     def align_buttons(self, center_y=112 + CLOCK_Y_OFFSET, gap=16):
         start_rect = self.initial.boundingRect()
@@ -1794,7 +2036,7 @@ class CinderCheer(QGraphicsItemGroup):
     SCALE = 0.8
     HEAD = (55, 40)     # head centre in the cat's own coordinates
 
-    def __init__(self):
+    def __init__(self, party_hat=True):
         super().__init__()
         outline_pen = QPen(CAT_OUTLINE_COLOR, CAT_OUTLINE_PEN_WIDTH)
         outline_pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
@@ -1857,13 +2099,14 @@ class CinderCheer(QGraphicsItemGroup):
         add(QGraphicsPathItem(collar), no_pen, QBrush(QColor(240, 54, 116, 200)))
         add(QGraphicsEllipseItem(48, 59, 12, 12), no_pen, yellow)
 
-        # party hat
-        hat_pen = QPen(CAT_OUTLINE_COLOR, 1.2)
-        add(QGraphicsPolygonItem(QPolygonF([QPointF(48, 18), QPointF(64, 18), QPointF(57, -10)])),
-            hat_pen, QBrush(QColor(255, 105, 150)))
-        add(QGraphicsEllipseItem(54, 8, 3, 3), no_pen, yellow)
-        add(QGraphicsEllipseItem(57, 0, 3, 3), no_pen, yellow)
-        add(QGraphicsEllipseItem(53.5, -13.5, 7, 7), QPen(CAT_OUTLINE_COLOR, 1), yellow)
+        # party hat (only for the to-do celebration)
+        if party_hat:
+            hat_pen = QPen(CAT_OUTLINE_COLOR, 1.2)
+            add(QGraphicsPolygonItem(QPolygonF([QPointF(48, 18), QPointF(64, 18), QPointF(57, -10)])),
+                hat_pen, QBrush(QColor(255, 105, 150)))
+            add(QGraphicsEllipseItem(54, 8, 3, 3), no_pen, yellow)
+            add(QGraphicsEllipseItem(57, 0, 3, 3), no_pen, yellow)
+            add(QGraphicsEllipseItem(53.5, -13.5, 7, 7), QPen(CAT_OUTLINE_COLOR, 1), yellow)
 
 
 # the little speech bubble next to Cinder
@@ -2008,6 +2251,15 @@ class TodoWidget(QObject):
         self.load_tasks()
         self.update_count()
 
+        # what the minimized pill shows (also keeps this object alive while minimized)
+        self.view.mini_text = self.mini_label
+
+    def mini_label(self):
+        if self.list.count() == 0:
+            return "📝 To-do"
+        left = self.tasks_left()
+        return "📝 All done!" if left == 0 else f"📝 {left} left"
+
     # ---- items ----
     def add_item(self, text, done=False):
         item = QListWidgetItem(text)
@@ -2072,8 +2324,8 @@ class TodoWidget(QObject):
         else:
             text = f"{left} left"
         self.count_text.setPlainText(text)
-        # right-aligned, leaving room for the x button
-        self.count_text.setPos(self.WIDTH - 30 - self.count_text.boundingRect().width(), 8)
+        # right-aligned, leaving room for the minimize and x buttons
+        self.count_text.setPos(self.WIDTH - 56 - self.count_text.boundingRect().width(), 8)
         self.empty_hint.setVisible(total == 0)
 
     # ---- saving / loading ----
@@ -2401,6 +2653,8 @@ class WaterSettingsWidget(QObject):
         self.graphic.addItem(test)
 
         self.refresh()
+
+        self.view.mini_text = lambda: "💧 Water reminder"   # pill label (keeps this object alive)
 
     # ---- little layout helpers ----
     def add_text(self, text, size, color):
